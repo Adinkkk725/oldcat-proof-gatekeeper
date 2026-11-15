@@ -1,0 +1,21 @@
+# Dependencies
+node_modules/
+
+# Secrets — never commit real values; .env.example documents the names only
+.env
+.env.*
+!.env.example
+
+# Agent runtime state (seen-set + idempotent response cache)
+data/
+*.seen.json
+tmp-seen.json
+test/tmp-seen.json
+
+# Local proof scratch / logs
+local-proof/
+*.log
+
+# Hosting / OS
+.vercel/
+.DS_Store
