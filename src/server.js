@@ -19,7 +19,7 @@ function createAgentServer() {
   const handler = new AgentHandler(cfg, new SeenStore(cfg.seenStorePath));
   return http.createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
-    const isAgentPath = url.pathname === "/agent" || url.pathname === "/";
+    const isAgentPath = url.pathname === "/agent" || url.pathname === "/" || url.pathname === "/api/agent";
     if (req.method === "GET" && (isAgentPath || url.pathname === "/health")) {
       const r = handler.health();
       res.writeHead(r.status, { "content-type": "application/json" });
