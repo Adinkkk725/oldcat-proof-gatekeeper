@@ -1,0 +1,66 @@
+"use strict";
+const http = require("http");
+const { loadConfig } = require("./config");
+const { AgentHandler, SIGNATURE_HEADER } = require("./handler");
+const { SeenStore } = require("./seenStore");
+
+// Plain Node HTTP server (local runs + any long-lived host) and, via
+// api/agent.js, the Vercel entrypoint.
+//   POST /agent   — registered agent endpoint (preflight + tasks)
+//   GET  /agent   — health check { ok: true, protocolVersion: "v1" }
+//   GET  /health  — same health payload
+const MAX_BODY_BYTES = 1_048_576;
+
+function createAgentServer() {
+  const cfg = loadConfig();
+  if (!cfg.hmacSecret) {
+    console.warn("[agent] WARNING: AGENT_GAMES_HMAC_SECRET is not set — POSTs will fail with 500 until it is.");
+  }
+  const handler = new AgentHandler(cfg, new SeenStore(cfg.seenStorePath));
+  return http.createServer((req, res) => {
+    const url = new URL(req.url ?? "/", "http://localhost");
+    const isAgentPath = url.pathname === "/agent" || url.pathname === "/";
+    if (req.method === "GET" && (isAgentPath || url.pathname === "/health")) {
+      const r = handler.health();
+      res.writeHead(r.status, { "content-type": "application/json" });
+      res.end(r.body);
+      return;
+    }
+    if (req.method === "POST" && isAgentPath) {
+      const chunks = [];
+      let size = 0;
+      req.on("data", (chunk) => {
+        size += chunk.length;
+        if (size > MAX_BODY_BYTES) {
+          res.writeHead(413, { "content-type": "application/json" });
+          res.end(JSON.stringify({ error: "payload_too_large" }));
+          req.destroy();
+          return;
+        }
+        chunks.push(chunk);
+      });
+      req.on("end", async () => {
+        const rawBody = Buffer.concat(chunks);
+        const signature = req.headers[SIGNATURE_HEADER];
+        const result = await handler.handlePost(rawBody, Array.isArray(signature) ? signature[0] : signature);
+        const headers = { "content-type": "application/json" };
+        if (result.signature) headers[SIGNATURE_HEADER] = result.signature;
+        res.writeHead(result.status, headers);
+        res.end(result.body);
+      });
+      req.on("error", () => { if (!res.headersSent) res.writeHead(400); res.end(); });
+      return;
+    }
+    res.writeHead(404, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: "not_found" }));
+  });
+}
+
+if (require.main === module) {
+  const cfg = loadConfig();
+  createAgentServer().listen(cfg.port, () => {
+    console.log(`[agent] Proof Gatekeeper listening on :${cfg.port} (POST /agent)`);
+  });
+}
+
+module.exports = { createAgentServer };
